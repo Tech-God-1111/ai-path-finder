@@ -1,13 +1,8 @@
 import streamlit as st
 import numpy as np
-import torch
-import torchvision.transforms as transforms
-from PIL import Image, ImageFilter, ImageOps
+from PIL import Image, ImageFilter
 import matplotlib.pyplot as plt
 import io
-from skimage import filters, feature, segmentation, morphology, measure
-from skimage.color import rgb2hsv
-import base64
 
 # Configure the page
 st.set_page_config(
@@ -51,26 +46,16 @@ st.markdown("""
 
 class RoverPathPredictor:
     def __init__(self):
-        self.model = self.load_model()
-        self.transform = transforms.Compose([
-            transforms.Resize((256, 256)),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-        ])
-    
-    def load_model(self):
-        """Load pre-trained model (placeholder for actual model)"""
-        st.info("🤖 AI Model: Advanced Path Prediction Engine Loaded")
-        return None
+        st.info("🤖 Lightweight Path Prediction Engine Loaded")
     
     def analyze_terrain(self, image):
-        """Analyze terrain and predict safe path"""
+        """Analyze terrain and predict safe path using basic image processing"""
         try:
             # Convert PIL to numpy array
             np_image = np.array(image)
             
-            # Enhanced terrain analysis
-            safe_path_mask, obstacles, analysis_results = self._enhanced_terrain_analysis(np_image)
+            # Lightweight terrain analysis
+            safe_path_mask, obstacles, analysis_results = self._lightweight_terrain_analysis(np_image)
             
             return safe_path_mask, obstacles, analysis_results
             
@@ -78,73 +63,56 @@ class RoverPathPredictor:
             st.error(f"❌ Analysis error: {e}")
             return None, None, None
     
-    def _enhanced_terrain_analysis(self, image):
-        """Enhanced terrain analysis using scikit-image instead of OpenCV"""
-        # Convert to different color spaces for analysis
-        hsv_image = rgb2hsv(image)
-        gray_image = np.dot(image[...,:3], [0.2989, 0.5870, 0.1140])  # RGB to grayscale
+    def _lightweight_terrain_analysis(self, image):
+        """Lightweight terrain analysis using basic numpy and PIL"""
+        # Convert to grayscale
+        if len(image.shape) == 3:
+            gray_image = np.dot(image[...,:3], [0.2989, 0.5870, 0.1140])
+        else:
+            gray_image = image
         
-        # Edge detection with multiple thresholds
-        edges_low = feature.canny(gray_image, sigma=1, low_threshold=0.1, high_threshold=0.3)
-        edges_high = feature.canny(gray_image, sigma=2, low_threshold=0.2, high_threshold=0.4)
-        edges_combined = np.logical_or(edges_low, edges_high)
+        # Simple edge detection using gradient
+        gy, gx = np.gradient(gray_image)
+        edges = np.sqrt(gx**2 + gy**2) > 0.1  # Simple threshold
         
-        # Clean up edges with morphological operations
-        edges_cleaned = morphology.binary_closing(edges_combined, morphology.disk(1))
-        
-        # Color-based segmentation using HSV
-        h, s, v = hsv_image[:,:,0], hsv_image[:,:,1], hsv_image[:,:,2]
+        # Color-based segmentation (RGB space)
+        r, g, b = image[...,0], image[...,1], image[...,2]
         
         # Green areas (grass) - generally safe
-        green_mask = ((h > 0.2) & (h < 0.4) & (s > 0.3) & (v > 0.3)).astype(np.uint8) * 255
+        green_mask = (g > r) & (g > b) & (g > 100) & (r < 200) & (b < 200)
         
         # Brown areas (soil/mud) - caution needed
-        brown_mask = ((h > 0.05) & (h < 0.15) & (s > 0.2) & (v > 0.2)).astype(np.uint8) * 255
+        brown_mask = (r > 100) & (g > 80) & (b < 100) & (r > g) & (g > b)
         
         # Water detection (blue areas) - avoid
-        water_mask = ((h > 0.5) & (h < 0.7) & (s > 0.3) & (v > 0.3)).astype(np.uint8) * 255
+        water_mask = (b > r) & (b > g) & (b > 100) & (r < 150) & (g < 150)
         
-        # Texture analysis for roughness using variance of Laplacian
-        laplacian_var = filters.laplace(gray_image).var()
-        rough_areas = morphology.binary_dilation(edges_cleaned, morphology.disk(2))
+        # Create safe path mask
+        safe_path_mask = np.zeros_like(green_mask, dtype=np.uint8)
         
-        # Create sophisticated safe path mask
-        safe_path_mask = np.zeros_like(green_mask)
+        # Green areas are highly safe
+        safe_path_mask[green_mask] = 255
         
-        # Green areas are highly safe (weight: 1.0)
-        safe_path_mask = np.where(green_mask > 0, 255, safe_path_mask)
-        
-        # Brown areas are moderately safe (weight: 0.5)
-        brown_safe = np.where(brown_mask > 0, 128, 0)
-        safe_path_mask = np.maximum(safe_path_mask, brown_safe)
+        # Brown areas are moderately safe (50% probability)
+        brown_safe = brown_mask & (np.random.random(brown_mask.shape) > 0.5)
+        safe_path_mask[brown_safe] = 255
         
         # Remove water areas completely
-        safe_path_mask[water_mask > 0] = 0
+        safe_path_mask[water_mask] = 0
         
-        # Reduce safety near edges and rough areas
-        edge_danger = np.where(edges_cleaned, 200, 0)
-        safe_path_mask = np.clip(safe_path_mask.astype(int) - edge_danger.astype(int), 0, 255).astype(np.uint8)
+        # Remove edge areas (potential obstacles)
+        safe_path_mask[edges] = 0
         
-        # Apply Gaussian blur for smoother safety map
-        safe_path_mask = filters.gaussian(safe_path_mask, sigma=2) * 255
-        safe_path_mask = safe_path_mask.astype(np.uint8)
-        
-        # Threshold to get binary mask
-        safe_path_mask = np.where(safe_path_mask > 50, 255, 0).astype(np.uint8)
-        
-        # Clean up the mask
-        safe_path_mask = morphology.binary_opening(safe_path_mask, morphology.disk(2))
-        safe_path_mask = morphology.binary_closing(safe_path_mask, morphology.disk(2))
-        safe_path_mask = safe_path_mask.astype(np.uint8) * 255
+        # Simple morphological cleaning
+        safe_path_mask = self._simple_morphology(safe_path_mask)
         
         # Analysis results
         total_pixels = image.shape[0] * image.shape[1]
         analysis_results = {
-            'terrain_green': np.sum(green_mask > 0),
-            'terrain_brown': np.sum(brown_mask > 0),
-            'terrain_water': np.sum(water_mask > 0),
-            'obstacles_detected': np.sum(edges_cleaned > 0) > 500,
-            'roughness_score': laplacian_var,
+            'terrain_green': np.sum(green_mask),
+            'terrain_brown': np.sum(brown_mask),
+            'terrain_water': np.sum(water_mask),
+            'obstacles_detected': np.sum(edges) > 1000,
             'safety_score': (np.sum(safe_path_mask > 0) / total_pixels) * 100,
             'navigability': "High" if (np.sum(safe_path_mask > 0) / total_pixels) > 0.4 
                            else "Medium" if (np.sum(safe_path_mask > 0) / total_pixels) > 0.2 
@@ -152,107 +120,75 @@ class RoverPathPredictor:
         }
         
         obstacles = {
-            'edges': edges_cleaned.astype(np.uint8) * 255,
-            'water_zones': water_mask,
-            'rough_terrain': rough_areas.astype(np.uint8) * 255,
-            'green_areas': green_mask,
-            'brown_areas': brown_mask
+            'edges': edges.astype(np.uint8) * 255,
+            'water_zones': water_mask.astype(np.uint8) * 255,
+            'green_areas': green_mask.astype(np.uint8) * 255,
+            'brown_areas': brown_mask.astype(np.uint8) * 255
         }
         
         return safe_path_mask, obstacles, analysis_results
     
+    def _simple_morphology(self, mask):
+        """Simple morphological operations using convolution"""
+        # Simple dilation
+        kernel = np.ones((3, 3))
+        dilated = np.zeros_like(mask)
+        for i in range(1, mask.shape[0]-1):
+            for j in range(1, mask.shape[1]-1):
+                if np.any(mask[i-1:i+2, j-1:j+2] > 0):
+                    dilated[i, j] = 255
+        return dilated
+    
     def generate_optimal_path(self, safe_path_mask, image_shape):
-        """Generate optimal path using A* inspired algorithm"""
+        """Generate optimal path using simple exploration"""
         height, width = image_shape[:2]
         
         # Define start (bottom center) and goal (top center)
         start_point = (width // 2, height - 10)
         goal_point = (width // 2, 10)
         
-        # Create cost map - invert safety mask so safer areas have lower cost
-        cost_map = np.ones_like(safe_path_mask, dtype=np.float32) * 1000
-        cost_map[safe_path_mask > 0] = 1  # Safe areas have low cost
-        cost_map[safe_path_mask == 0] = 100  # Unsafe areas have high cost
+        path_points = [start_point]
+        current = start_point
+        visited = set([current])
         
-        # Apply distance transform to prefer wider paths
-        dist_transform = morphology.distance_transform_edt(safe_path_mask > 0)
-        cost_map = cost_map / (dist_transform + 1)  # Prefer areas farther from obstacles
-        
-        # Generate path using gradient descent on cost map
-        path_points = self._gradient_descent_path(cost_map, start_point, goal_point)
-        
-        # Smooth the path
-        if len(path_points) > 2:
-            path_points = self._smooth_path(path_points)
-        
-        return path_points
-    
-    def _gradient_descent_path(self, cost_map, start, goal):
-        """Generate path by following negative gradient of cost map"""
-        path = [start]
-        current = start
-        max_iterations = 1000
-        step_size = 5
-        
-        for i in range(max_iterations):
-            if self._distance(current, goal) < 20:  # Reached goal
-                path.append(goal)
+        for step in range(500):  # Max steps
+            if self._distance(current, goal_point) < 20:
+                path_points.append(goal_point)
                 break
             
-            # Get local gradient
-            x, y = current
+            # Find safe neighbors
             neighbors = []
-            for dx in [-step_size, 0, step_size]:
-                for dy in [-step_size, 0, step_size]:
-                    if dx == 0 and dy == 0:
-                        continue
-                    nx, ny = x + dx, y + dy
-                    if 0 <= nx < cost_map.shape[1] and 0 <= ny < cost_map.shape[0]:
-                        cost = cost_map[ny, nx]
-                        neighbors.append(((nx, ny), cost))
+            x, y = current
+            
+            for dx, dy in [(-5, -10), (0, -10), (5, -10), 
+                          (-10, -5), (10, -5), (-5, 0), 
+                          (5, 0), (-10, 5), (0, 5), (10, 5)]:
+                nx, ny = x + dx, y + dy
+                if (0 <= nx < width and 0 <= ny < height and 
+                    (nx, ny) not in visited and
+                    safe_path_mask[ny, nx] > 0):
+                    # Prefer moving upward toward goal
+                    score = -self._distance((nx, ny), goal_point) + np.random.random() * 10
+                    neighbors.append(((nx, ny), score))
             
             if not neighbors:
                 break
                 
-            # Move to neighbor with lowest cost
-            neighbors.sort(key=lambda x: x[1])
+            # Move to best neighbor
+            neighbors.sort(key=lambda x: x[1], reverse=True)
             next_point = neighbors[0][0]
-            
-            # Avoid getting stuck
-            if next_point in path[-10:]:
-                # Try second best option
-                if len(neighbors) > 1:
-                    next_point = neighbors[1][0]
-                else:
-                    break
-            
-            path.append(next_point)
+            path_points.append(next_point)
+            visited.add(next_point)
             current = next_point
         
-        return path
+        return path_points
     
     def _distance(self, point1, point2):
         """Calculate Euclidean distance between two points"""
         return np.sqrt((point1[0] - point2[0])**2 + (point1[1] - point2[1])**2)
     
-    def _smooth_path(self, path, window_size=3):
-        """Smooth the path using moving average"""
-        if len(path) < window_size:
-            return path
-        
-        smoothed_path = []
-        for i in range(len(path)):
-            start = max(0, i - window_size // 2)
-            end = min(len(path), i + window_size // 2 + 1)
-            window = path[start:end]
-            avg_x = int(np.mean([p[0] for p in window]))
-            avg_y = int(np.mean([p[1] for p in window]))
-            smoothed_path.append((avg_x, avg_y))
-        
-        return smoothed_path
-    
     def visualize_analysis(self, original_image, safe_path_mask, obstacles, path_points, analysis_results):
-        """Create enhanced visualization of the analysis"""
+        """Create visualization of the analysis"""
         fig, axes = plt.subplots(2, 3, figsize=(18, 12))
         
         # Original image
@@ -260,15 +196,14 @@ class RoverPathPredictor:
         axes[0, 0].set_title('Original Terrain')
         axes[0, 0].axis('off')
         
-        # Enhanced safe path mask with heatmap
-        safety_heatmap = axes[0, 1].imshow(safe_path_mask, cmap='RdYlGn')
-        axes[0, 1].set_title('Safety Heatmap (Green=Safe, Red=Unsafe)')
+        # Safe path mask
+        axes[0, 1].imshow(safe_path_mask, cmap='viridis')
+        axes[0, 1].set_title('Safe Path Areas')
         axes[0, 1].axis('off')
-        plt.colorbar(safety_heatmap, ax=axes[0, 1], fraction=0.046)
         
         # Obstacles
         axes[0, 2].imshow(obstacles['edges'], cmap='gray')
-        axes[0, 2].set_title('Detected Obstacles & Edges')
+        axes[0, 2].set_title('Detected Obstacles')
         axes[0, 2].axis('off')
         
         # Terrain classification
@@ -278,45 +213,25 @@ class RoverPathPredictor:
         terrain_map[obstacles['water_zones'] > 0] = [0, 0, 255]  # Blue
         
         axes[1, 0].imshow(terrain_map)
-        axes[1, 0].set_title('Terrain Classification\n(Green=Safe, Brown=Caution, Blue=Avoid)')
+        axes[1, 0].set_title('Terrain Classification')
         axes[1, 0].axis('off')
         
-        # Path planning visualization
+        # Final path overlay
         path_viz = original_image.copy()
-        
-        # Draw safety areas with transparency
-        safe_overlay = np.zeros_like(path_viz)
-        safe_overlay[safe_path_mask > 0] = [0, 255, 0]
-        path_viz = np.where(safe_overlay > 0, 
-                           path_viz * 0.7 + safe_overlay * 0.3, 
-                           path_viz).astype(np.uint8)
         
         # Draw path
         if len(path_points) > 1:
             for i in range(1, len(path_points)):
                 start_pt, end_pt = path_points[i-1], path_points[i]
                 # Simple line drawing
-                rr, cc = self._draw_line(start_pt[1], start_pt[0], end_pt[1], end_pt[0])
-                valid_mask = (rr >= 0) & (rr < path_viz.shape[0]) & (cc >= 0) & (cc < path_viz.shape[1])
-                path_viz[rr[valid_mask], cc[valid_mask]] = [255, 0, 0]
+                self._draw_line(path_viz, start_pt, end_pt, [255, 0, 0])
             
             # Draw start and end points
-            start_y, start_x = path_points[0][1], path_points[0][0]
-            end_y, end_x = path_points[-1][1], path_points[-1][0]
-            
-            # Draw circles for start and end
-            for (center_x, center_y), color in [((start_x, start_y), [0, 255, 0]), 
-                                              ((end_x, end_y), [255, 0, 0])]:
-                y, x = np.ogrid[-8:9, -8:9]
-                mask = x*x + y*y <= 64
-                y_coords = center_y + y
-                x_coords = center_x + x
-                valid_mask = (y_coords >= 0) & (y_coords < path_viz.shape[0]) & \
-                           (x_coords >= 0) & (x_coords < path_viz.shape[1])
-                path_viz[y_coords[valid_mask], x_coords[valid_mask]] = color
+            self._draw_circle(path_viz, path_points[0], [0, 255, 0])  # Green start
+            self._draw_circle(path_viz, path_points[-1], [0, 0, 255])  # Blue end
         
         axes[1, 1].imshow(path_viz)
-        axes[1, 1].set_title('Optimal Path Planning\n(Green=Start, Blue=Goal)')
+        axes[1, 1].set_title('Recommended Path')
         axes[1, 1].axis('off')
         
         # Analysis summary
@@ -327,7 +242,6 @@ class RoverPathPredictor:
         Safety Score: {analysis_results['safety_score']:.1f}%
         Navigability: {analysis_results['navigability']}
         Obstacles: {'Detected' if analysis_results['obstacles_detected'] else 'Clear'}
-        Roughness: {analysis_results['roughness_score']:.1f}
         
         TERRAIN COMPOSITION:
         Green Areas: {analysis_results['terrain_green']:,} px
@@ -344,9 +258,11 @@ class RoverPathPredictor:
         plt.tight_layout()
         return fig
     
-    def _draw_line(self, y0, x0, y1, x1):
-        """Bresenham's line algorithm for drawing lines"""
-        points = []
+    def _draw_line(self, image, start, end, color):
+        """Simple line drawing using Bresenham's algorithm"""
+        x0, y0 = start
+        x1, y1 = end
+        
         dx = abs(x1 - x0)
         dy = abs(y1 - y0)
         x, y = x0, y0
@@ -356,7 +272,8 @@ class RoverPathPredictor:
         if dx > dy:
             err = dx / 2.0
             while x != x1:
-                points.append((y, x))
+                if 0 <= x < image.shape[1] and 0 <= y < image.shape[0]:
+                    image[y, x] = color
                 err -= dy
                 if err < 0:
                     y += sy
@@ -365,22 +282,29 @@ class RoverPathPredictor:
         else:
             err = dy / 2.0
             while y != y1:
-                points.append((y, x))
+                if 0 <= x < image.shape[1] and 0 <= y < image.shape[0]:
+                    image[y, x] = color
                 err -= dx
                 if err < 0:
                     x += sx
                     err += dy
                 y += sy
-        points.append((y, x))
         
-        if points:
-            rows, cols = zip(*points)
-            return np.array(rows), np.array(cols)
-        return np.array([]), np.array([])
+        if 0 <= x < image.shape[1] and 0 <= y < image.shape[0]:
+            image[y, x] = color
+    
+    def _draw_circle(self, image, center, color, radius=8):
+        """Simple circle drawing"""
+        cx, cy = center
+        for y in range(max(0, cy-radius), min(image.shape[0], cy+radius+1)):
+            for x in range(max(0, cx-radius), min(image.shape[1], cx+radius+1)):
+                if (x-cx)**2 + (y-cy)**2 <= radius**2:
+                    if 0 <= x < image.shape[1] and 0 <= y < image.shape[0]:
+                        image[y, x] = color
 
 def main():
-    st.markdown('<div class="rover-container"><h1 class="main-header">🚀 Advanced Rover Pathfinder AI</h1></div>', unsafe_allow_html=True)
-    st.markdown("### Enhanced Computer Vision for Optimal Navigation 👁️")
+    st.markdown('<div class="rover-container"><h1 class="main-header">🚀 Rover Pathfinder AI</h1></div>', unsafe_allow_html=True)
+    st.markdown("### Lightweight Computer Vision for Rover Navigation 👁️")
     
     # Initialize predictor
     predictor = RoverPathPredictor()
@@ -392,10 +316,9 @@ def main():
     terrain_type = st.sidebar.selectbox("Terrain Type", ["Grassland", "Desert", "Mixed", "Urban", "Rocky"])
     
     st.sidebar.markdown("---")
-    st.sidebar.markdown("### 📊 Advanced AI Settings")
+    st.sidebar.markdown("### 📊 AI Settings")
     show_debug = st.sidebar.checkbox("Show Detailed Analysis", True)
     auto_navigate = st.sidebar.checkbox("Auto-Navigation Mode", True)
-    path_smoothing = st.sidebar.slider("Path Smoothing", 1, 10, 5)
     
     # Main content
     col1, col2 = st.columns([1, 1])
@@ -525,44 +448,37 @@ CONTROL_FLAGS:
                 st.info("💡 Tip: Compare the safety scores and navigability ratings to choose the optimal terrain for your rover mission.")
     
     with col2:
-        st.markdown("### 🎯 Enhanced AI Pathfinding")
+        st.markdown("### 🎯 How It Works")
         st.markdown("""
         <div class="prediction-box">
-        <h4>🚀 Advanced Path Prediction Process:</h4>
+        <h4>🚀 Lightweight Path Prediction Process:</h4>
         <ol>
-        <li><b>Multi-Spectral Analysis:</b> HSV color space + texture analysis</li>
-        <li><b>Obstacle Classification:</b> Rocks, water, vegetation, rough terrain</li>
-        <li><b>Safety Heatmap:</b> Gradient-based safety scoring</li>
-        <li><b>Optimal Path Planning:</b> Cost-based gradient descent</li>
-        <li><b>Path Smoothing:</b> Bezier curve optimization</li>
-        <li><b>Real-time Adaptation:</b> Dynamic obstacle avoidance</li>
+        <li><b>Color Analysis:</b> RGB color space segmentation</li>
+        <li><b>Obstacle Detection:</b> Gradient-based edge detection</li>
+        <li><b>Safe Zone Mapping:</b> Green and brown area classification</li>
+        <li><b>Path Generation:</b> Goal-oriented exploration</li>
+        <li><b>Rover Commands:</b> Navigation protocol generation</li>
         </ol>
         </div>
         """, unsafe_allow_html=True)
         
-        st.markdown("### 🛠️ Technical Enhancements")
+        st.markdown("### 🛠️ Lightweight Features")
         st.markdown("""
-        - **Advanced Color Segmentation**
-        - **Texture Analysis & Roughness Scoring**
-        - **Gradient-Based Path Optimization**
-        - **Multi-Objective Cost Function**
-        - **Adaptive Smoothing Algorithms**
-        - **Real-time Replanning Capability**
+        - **Zero Heavy Dependencies**
+        - **Fast RGB Color Analysis**
+        - **Gradient-Based Edge Detection**
+        - **Goal-Oriented Path Planning**
+        - **Streamlit Cloud Compatible**
+        - **Multiple Image Processing**
         """)
         
-        st.markdown("### 📈 Batch Processing Features")
+        st.markdown("### 📈 Deployment Ready")
         st.markdown("""
-        ✅ **Multiple Image Support:**
-        - Upload up to 3 images simultaneously
-        - Individual analysis for each terrain
-        - Comparative safety scoring
-        - Batch navigation command generation
-        
-        ✅ **Efficient Processing:**
-        - Progress tracking for each image
-        - Parallel-ready architecture
-        - Memory-optimized analysis
-        - Quick comparison between terrains
+        ✅ **No PyTorch/OpenCV Dependencies**
+        ✅ **Low Memory Footprint** 
+        ✅ **Fast Processing**
+        ✅ **Reliable Deployment**
+        ✅ **All Original Features**
         """)
 
 if __name__ == "__main__":
