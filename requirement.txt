@@ -1,8 +1,4 @@
 streamlit
 numpy
-torch
-torchvision
 pillow
 matplotlib
-scikit-image
-scipy
