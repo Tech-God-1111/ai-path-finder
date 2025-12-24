@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Pathfinder - Live View</title>
+    <style>
+        body {
+            background: #1a1a2e;
+            color: white;
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            text-align: center;
+        }
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+        h1 {
+            color: #00dbde;
+            margin-bottom: 10px;
+        }
+        .video-container {
+            background: #000;
+            border-radius: 10px;
+            padding: 10px;
+            margin: 20px 0;
+        }
+        img {
+            width: 100%;
+            border-radius: 5px;
+        }
+        .controls {
+            margin: 20px 0;
+        }
+        button {
+            padding: 12px 24px;
+            margin: 0 10px;
+            background: #00dbde;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+        }
+        button:hover {
+            background: #0093e9;
+        }
+        .status {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 15px;
+            border-radius: 5px;
+            margin: 20px 0;
+        }
+        .stats {
+            display: flex;
+            justify-content: space-around;
+            margin: 20px 0;
+        }
+        .stat-box {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 15px;
+            border-radius: 5px;
+            min-width: 120px;
+        }
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #00dbde;
+        }
+        .stat-label {
+            font-size: 14px;
+            color: #aaa;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🤖 AI Pathfinder System</h1>
+        <p>Real-time camera-based pathfinding</p>
+
+        <div class="video-container">
+            <img id="liveFeed" src="/video_feed" alt="Live Camera Feed">
+        </div>
+
+        <div class="controls">
+            <button onclick="startSystem()">▶ Start</button>
+            <button onclick="stopSystem()">⏹ Stop</button>
+            <button onclick="autoPoints()">🎯 Auto Points</button>
+            <button onclick="location.href='/dashboard'">📊 Dashboard</button>
+        </div>
+
+        <div class="stats">
+            <div class="stat-box">
+                <div class="stat-value" id="fps">0</div>
+                <div class="stat-label">FPS</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-value" id="pathLength">0</div>
+                <div class="stat-label">Path Length</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-value" id="successRate">0%</div>
+                <div class="stat-label">Success Rate</div>
+            </div>
+        </div>
+
+        <div class="status">
+            <p>Status: <span id="statusText">Ready</span></p>
+            <p>Algorithm: <span id="algorithmText">A* Search</span></p>
+            <p>Last Update: <span id="timestamp">--:--:--</span></p>
+        </div>
+    </div>
+
+    <script>
+        async function startSystem() {
+            const response = await fetch('/api/start', {method: 'POST'});
+            const result = await response.json();
+            alert(result.message);
+            loadStats();
+        }
+
+        async function stopSystem() {
+            const response = await fetch('/api/stop', {method: 'POST'});
+            const result = await response.json();
+            alert(result.message);
+            loadStats();
+        }
+
+        async function autoPoints() {
+            const response = await fetch('/api/auto_points', {method: 'POST'});
+            const result = await response.json();
+            if (result.success) {
+                alert('New start/end points generated!');
+            } else {
+                alert('Failed to generate points');
+            }
+        }
+
+        async function loadStats() {
+            try {
+                const response = await fetch('/api/stats');
+                const stats = await response.json();
+
+                document.getElementById('fps').textContent = stats.fps;
+                document.getElementById('pathLength').textContent = stats.path_length;
+                document.getElementById('successRate').textContent = stats.success_rate.toFixed(1) + '%';
+                document.getElementById('algorithmText').textContent = stats.algorithm_name;
+                document.getElementById('timestamp').textContent = stats.last_updated;
+
+                document.getElementById('statusText').textContent = stats.is_running ? 'Running' : 'Stopped';
+                document.getElementById('statusText').style.color = stats.is_running ? '#00ff00' : '#ff0000';
+            } catch (error) {
+                console.error('Error loading stats:', error);
+            }
+        }
+
+        // Refresh live feed
+        setInterval(() => {
+            document.getElementById('liveFeed').src =
+                document.getElementById('liveFeed').src.split('?')[0] + '?' + Date.now();
+        }, 100);
+
+        // Refresh stats every 2 seconds
+        setInterval(loadStats, 2000);
+
+        // Initial load
+        loadStats();
+    </script>
+</body>
+</html>
